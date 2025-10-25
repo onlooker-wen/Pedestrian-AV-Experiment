@@ -1,0 +1,905 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>行人-车辆交互决策实验</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            background-color: #000;
+            color: #fff;
+            font-family: "Microsoft YaHei", Arial, sans-serif;
+            overflow: hidden;
+        }
+        #container {
+            width: 100vw;
+            height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            position: relative;
+        }
+        #display {
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            position: relative;
+        }
+        img, video {
+            width: 100vw;
+            height: 100vh;
+            object-fit: cover;
+        }
+        .instruction {
+            font-size: 32px;
+            line-height: 2;
+            text-align: center;
+            padding: 40px;
+        }
+        .practice-instruction {
+            font-size: 36px;
+            line-height: 2.5;
+            text-align: center;
+        }
+        .practice-question {
+            font-size: 40px;
+            margin-bottom: 60px;
+            font-weight: bold;
+        }
+        .feedback {
+            font-size: 48px;
+            font-weight: bold;
+        }
+        .correct {
+            color: #00ff00;
+        }
+        .incorrect {
+            color: #ff0000;
+        }
+        .fixation {
+            font-size: 80px;
+            font-weight: bold;
+            color: #fff;
+        }
+        .response-cue {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 80px;
+            height: 80px;
+            border: 5px solid #FFD700;
+            border-radius: 50%;
+            animation: pulse 0.8s ease-in-out infinite;
+            box-shadow: 0 0 20px #FFD700;
+        }
+        @keyframes pulse {
+            0%, 100% { transform: translate(-50%, -50%) scale(1); opacity: 1; }
+            50% { transform: translate(-50%, -50%) scale(1.15); opacity: 0.8; }
+        }
+        
+        /* 被试信息输入界面 */
+        #inputScreen {
+            background-color: #000;
+            width: 100vw;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+        }
+        #inputScreen h1 {
+            font-size: 48px;
+            margin-bottom: 40px;
+            letter-spacing: 3px;
+        }
+        #inputScreen input {
+            font-size: 32px;
+            padding: 15px 30px;
+            background-color: #333;
+            color: #fff;
+            border: 2px solid #666;
+            border-radius: 8px;
+            text-align: center;
+            margin-bottom: 30px;
+            width: 400px;
+        }
+        #inputScreen button {
+            font-size: 28px;
+            padding: 15px 50px;
+            background-color: #4CAF50;
+            color: #fff;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            margin: 10px;
+        }
+        #inputScreen button:hover {
+            background-color: #45a049;
+        }
+        #inputScreen .monitor-link {
+            margin-top: 30px;
+            font-size: 18px;
+            color: #4CAF50;
+        }
+        #inputScreen .monitor-link a {
+            color: #4CAF50;
+            text-decoration: underline;
+        }
+        
+        /* 实时数据监控面板 */
+        #monitorPanel {
+            position: fixed;
+            top: 0;
+            right: -400px;
+            width: 400px;
+            height: 100vh;
+            background-color: rgba(0, 0, 0, 0.95);
+            color: #fff;
+            padding: 20px;
+            overflow-y: auto;
+            transition: right 0.3s;
+            z-index: 1000;
+            border-left: 2px solid #4CAF50;
+        }
+        #monitorPanel.show {
+            right: 0;
+        }
+        #monitorToggle {
+            position: fixed;
+            top: 10px;
+            right: 10px;
+            padding: 10px 15px;
+            background-color: rgba(76, 175, 80, 0.8);
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            z-index: 1001;
+            font-size: 14px;
+        }
+        #monitorPanel h3 {
+            color: #4CAF50;
+            margin-bottom: 15px;
+            font-size: 18px;
+        }
+        .monitor-item {
+            background-color: rgba(255, 255, 255, 0.1);
+            padding: 10px;
+            margin-bottom: 10px;
+            border-radius: 5px;
+            font-size: 12px;
+        }
+        .monitor-item strong {
+            color: #FFD700;
+        }
+        .hidden {
+            display: none !important;
+        }
+        
+        /* 全屏提示 */
+        #fullscreenPrompt {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background-color: rgba(0, 0, 0, 0.9);
+            padding: 40px;
+            border-radius: 10px;
+            text-align: center;
+            z-index: 2000;
+        }
+        #fullscreenPrompt button {
+            margin-top: 20px;
+            font-size: 24px;
+            padding: 15px 40px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+    <!-- 全屏提示 -->
+    <div id="fullscreenPrompt" class="hidden">
+        <h2 style="font-size: 32px; margin-bottom: 20px;">实验需要全屏模式</h2>
+        <p style="font-size: 20px;">点击下方按钮进入全屏</p>
+        <button onclick="enterFullscreen()">进入全屏</button>
+    </div>
+
+    <!-- 实时监控面板 -->
+    <button id="monitorToggle" onclick="toggleMonitor()">📊 数据监控</button>
+    <div id="monitorPanel">
+        <h3>实时数据监控</h3>
+        <div style="margin-bottom: 15px; padding: 10px; background-color: rgba(76, 175, 80, 0.2); border-radius: 5px;">
+            <strong>监控URL:</strong><br>
+            <input type="text" id="monitorUrl" readonly style="width: 100%; background: #333; color: #fff; border: none; padding: 5px; margin-top: 5px; font-size: 11px;" value="加载中...">
+            <button onclick="copyMonitorUrl()" style="margin-top: 5px; padding: 5px 10px; font-size: 12px;">复制链接</button>
+        </div>
+        <div id="monitorContent"></div>
+    </div>
+
+    <!-- 被试信息输入界面 -->
+    <div id="inputScreen">
+        <h1>欢迎参与实验</h1>
+        <input type="text" id="participantId" placeholder="请输入被试编号" maxlength="20">
+        <button onclick="startExperimentWithId()">开始实验</button>
+        <div class="monitor-link">
+            <p>实验者监控：在另一台电脑浏览器打开</p>
+            <p id="monitorLinkDisplay">加载中...</p>
+        </div>
+    </div>
+
+    <div id="container" class="hidden">
+        <div id="display"></div>
+    </div>
+
+    <script>
+        const MATERIAL_PATH = '/Users/onlooker_wen/Desktop/material/';
+        
+        // 实验配置
+        const config = {
+            introImages: ['intro_01.png', 'intro_02.png', 'intro_03.png'],
+            beginImage: 'begin.png',
+            breakImage: 'break.png',
+            endImage: 'end.png',
+            exampleVideos: ['example1.mp4', 'example2.mp4'],
+            decisionVideos: [
+                'Crossing_v1.mp4', 'Crossing_v2.mp4',
+                'Following_v1.mp4', 'Following_v2.mp4',
+                'parking_v2.mp4', 'parking.mp4',
+                'Starting_v2.mp4', 'starting.mp4'
+            ],
+            fixationDuration: 3000,
+            videoBeforeCue: 6000,
+            responseTimeout: 20000
+        };
+
+        // 练习试次
+        const practiceTrials = [
+            { question: '请按下能表示【自己先通过】的键', correctKey: 'j' },
+            { question: '请按下能表示【让车先通过】的键', correctKey: 'f' }
+        ];
+
+        // 实验数据
+        let experimentData = {
+            participantId: '',
+            startTime: '',
+            practiceData: [],
+            blockData: []
+        };
+
+        let currentPhase = 'intro';
+        let currentIndex = 0;
+        let currentBlock = 0;
+        let currentTrial = 0;
+        let blockOrder = [];
+        let trialStartTime = 0;
+        let awaitingResponse = false;
+        let currentVideo = '';
+        let currentExample = '';
+        let currentVideos = [];
+        let videoElement = null;
+        let responseTimeout = null;
+        let responseCueTimeout = null;
+        let monitorVisible = false;
+        let sessionId = generateSessionId();
+
+        // 生成会话ID
+        function generateSessionId() {
+            return 'session_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+        }
+
+        // 初始化监控URL
+        window.addEventListener('load', () => {
+            const currentUrl = window.location.href;
+            const baseUrl = currentUrl.split('?')[0];
+            const monitorUrl = baseUrl + '?monitor=' + sessionId;
+            
+            document.getElementById('monitorUrl').value = monitorUrl;
+            document.getElementById('monitorLinkDisplay').innerHTML = `<a href="${monitorUrl}" target="_blank">${monitorUrl}</a>`;
+            
+            // 检查是否是监控模式
+            const urlParams = new URLSearchParams(window.location.search);
+            const monitorMode = urlParams.get('monitor');
+            
+            if (monitorMode) {
+                initMonitorMode(monitorMode);
+            }
+        });
+
+        // 初始化监控模式
+        function initMonitorMode(sessionId) {
+            document.getElementById('inputScreen').classList.add('hidden');
+            document.getElementById('container').classList.add('hidden');
+            document.getElementById('monitorToggle').classList.add('hidden');
+            
+            const monitorPanel = document.getElementById('monitorPanel');
+            monitorPanel.style.right = '0';
+            monitorPanel.style.width = '100vw';
+            monitorPanel.style.height = '100vh';
+            monitorPanel.querySelector('h3').textContent = '实验监控面板 - 会话: ' + sessionId;
+            
+            // 开始接收数据
+            startReceivingMonitorData(sessionId);
+        }
+
+        // 发送监控数据（使用localStorage跨标签页通信）
+        function sendMonitorData(title, content) {
+            const data = {
+                sessionId: sessionId,
+                timestamp: new Date().toISOString(),
+                time: new Date().toLocaleTimeString(),
+                title: title,
+                content: content
+            };
+            
+            // 存储到localStorage用于跨标签页通信
+            const key = 'monitor_' + sessionId;
+            const existingData = JSON.parse(localStorage.getItem(key) || '[]');
+            existingData.unshift(data);
+            
+            // 只保留最近50条
+            if (existingData.length > 50) {
+                existingData.length = 50;
+            }
+            
+            localStorage.setItem(key, JSON.stringify(existingData));
+            
+            // 触发storage事件
+            localStorage.setItem('monitor_update_' + sessionId, Date.now().toString());
+        }
+
+        // 接收监控数据
+        function startReceivingMonitorData(sessionId) {
+            const key = 'monitor_' + sessionId;
+            
+            // 立即加载现有数据
+            loadMonitorData(sessionId);
+            
+            // 监听storage事件
+            window.addEventListener('storage', (e) => {
+                if (e.key === 'monitor_update_' + sessionId) {
+                    loadMonitorData(sessionId);
+                }
+            });
+            
+            // 定期刷新
+            setInterval(() => {
+                loadMonitorData(sessionId);
+            }, 1000);
+        }
+
+        // 加载监控数据
+        function loadMonitorData(sessionId) {
+            const key = 'monitor_' + sessionId;
+            const data = JSON.parse(localStorage.getItem(key) || '[]');
+            const monitorContent = document.getElementById('monitorContent');
+            
+            monitorContent.innerHTML = '';
+            data.forEach(item => {
+                const div = document.createElement('div');
+                div.className = 'monitor-item';
+                div.innerHTML = `<strong>[${item.time}] ${item.title}</strong><br>${item.content}`;
+                monitorContent.appendChild(div);
+            });
+        }
+
+        // 复制监控URL
+        function copyMonitorUrl() {
+            const url = document.getElementById('monitorUrl');
+            url.select();
+            document.execCommand('copy');
+            alert('监控链接已复制！');
+        }
+
+        // 全屏相关
+        function enterFullscreen() {
+            const elem = document.documentElement;
+            
+            // 尝试不同的全屏API
+            if (elem.requestFullscreen) {
+                elem.requestFullscreen({ navigationUI: "hide" });
+            } else if (elem.webkitRequestFullscreen) {
+                elem.webkitRequestFullscreen();
+            } else if (elem.mozRequestFullScreen) {
+                elem.mozRequestFullScreen();
+            } else if (elem.msRequestFullscreen) {
+                elem.msRequestFullscreen();
+            }
+            
+            document.getElementById('fullscreenPrompt').classList.add('hidden');
+            
+            // 尝试隐藏浏览器UI（仅在某些浏览器中有效）
+            setTimeout(() => {
+                window.scrollTo(0, 1);
+            }, 100);
+        }
+
+        function checkFullscreen() {
+            if (!document.fullscreenElement && !document.webkitFullscreenElement && !document.msFullscreenElement) {
+                document.getElementById('fullscreenPrompt').classList.remove('hidden');
+            }
+        }
+
+        // 监听退出全屏
+        document.addEventListener('fullscreenchange', checkFullscreen);
+        document.addEventListener('webkitfullscreenchange', checkFullscreen);
+        document.addEventListener('msfullscreenchange', checkFullscreen);
+
+        // 开始实验（输入被试编号后）
+        function startExperimentWithId() {
+            const participantId = document.getElementById('participantId').value.trim();
+            
+            if (!participantId) {
+                alert('请输入被试编号！');
+                return;
+            }
+            
+            experimentData.participantId = participantId;
+            experimentData.startTime = new Date().toISOString();
+            
+            updateMonitor('实验开始', `被试编号: ${participantId}`);
+            sendMonitorData('实验开始', `被试编号: ${participantId}`);
+            
+            // 隐藏输入界面
+            document.getElementById('inputScreen').classList.add('hidden');
+            document.getElementById('container').classList.remove('hidden');
+            
+            // 进入全屏
+            enterFullscreen();
+            
+            // 开始实验
+            setTimeout(() => {
+                startExperiment();
+            }, 500);
+        }
+
+        // 切换监控面板
+        function toggleMonitor() {
+            monitorVisible = !monitorVisible;
+            const panel = document.getElementById('monitorPanel');
+            if (monitorVisible) {
+                panel.classList.add('show');
+            } else {
+                panel.classList.remove('show');
+            }
+        }
+
+        // 更新监控面板（本地）
+        function updateMonitor(title, content) {
+            const monitorContent = document.getElementById('monitorContent');
+            const timestamp = new Date().toLocaleTimeString();
+            const item = document.createElement('div');
+            item.className = 'monitor-item';
+            item.innerHTML = `<strong>[${timestamp}] ${title}</strong><br>${content}`;
+            monitorContent.insertBefore(item, monitorContent.firstChild);
+            
+            while (monitorContent.children.length > 20) {
+                monitorContent.removeChild(monitorContent.lastChild);
+            }
+        }
+
+        // 随机化Block顺序
+        function randomizeBlockOrder() {
+            blockOrder = shuffle([0, 1]);
+        }
+
+        // 打乱数组
+        function shuffle(array) {
+            const arr = [...array];
+            for (let i = arr.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [arr[i], arr[j]] = [arr[j], arr[i]];
+            }
+            return arr;
+        }
+
+        // 显示注视点
+        function showFixation() {
+            const display = document.getElementById('display');
+            display.innerHTML = `<div class="fixation">+</div>`;
+        }
+
+        // 显示图片
+        function showImage(imageName) {
+            const display = document.getElementById('display');
+            display.innerHTML = `<img src="${MATERIAL_PATH}${imageName}" alt="${imageName}">`;
+        }
+
+        // 显示视频
+        function showVideo(videoName) {
+            const display = document.getElementById('display');
+            display.innerHTML = `
+                <video id="experimentVideo" autoplay>
+                    <source src="${MATERIAL_PATH}${videoName}" type="video/mp4">
+                </video>
+            `;
+            
+            videoElement = document.getElementById('experimentVideo');
+            videoElement.play().catch(e => console.error('视频播放失败:', e));
+            
+            return videoElement;
+        }
+
+        // 显示反应提示圈
+        function showResponseCue() {
+            const cue = document.createElement('div');
+            cue.className = 'response-cue';
+            cue.id = 'responseCue';
+            document.getElementById('display').appendChild(cue);
+        }
+
+        // 移除反应提示圈
+        function removeResponseCue() {
+            const cue = document.getElementById('responseCue');
+            if (cue) cue.remove();
+        }
+
+        // 显示文本指导
+        function showInstruction(text) {
+            const display = document.getElementById('display');
+            display.innerHTML = `<div class="instruction">${text}</div>`;
+        }
+
+        // 显示练习指导
+        function showPracticeInstruction(text) {
+            const display = document.getElementById('display');
+            display.innerHTML = `<div class="practice-instruction"><div class="practice-question">${text}</div>(按错将重新练习)</div>`;
+        }
+
+        // 显示反馈
+        function showFeedback(correct) {
+            const display = document.getElementById('display');
+            const feedbackClass = correct ? 'correct' : 'incorrect';
+            const feedbackText = correct ? '✓' : '✗';
+            display.innerHTML = `<div class="feedback ${feedbackClass}">${feedbackText}</div>`;
+        }
+
+        // 清除所有计时器
+        function clearAllTimers() {
+            if (responseTimeout) {
+                clearTimeout(responseTimeout);
+                responseTimeout = null;
+            }
+            if (responseCueTimeout) {
+                clearTimeout(responseCueTimeout);
+                responseCueTimeout = null;
+            }
+        }
+
+        // 键盘事件处理
+        document.addEventListener('keydown', handleKeyPress);
+
+        function handleKeyPress(e) {
+            const key = e.key.toLowerCase();
+            
+            if (currentPhase === 'intro') {
+                if (key === ' ') {
+                    nextIntro();
+                }
+            } else if (currentPhase === 'practice') {
+                if (awaitingResponse && (key === 'f' || key === 'j')) {
+                    handlePracticeResponse(key);
+                }
+            } else if (currentPhase === 'decision') {
+                if (awaitingResponse && (key === 'f' || key === 'j')) {
+                    handleDecisionResponse(key);
+                }
+            } else if (currentPhase === 'waitForSpace') {
+                if (key === ' ') {
+                    continueFromWait();
+                }
+            } else if (currentPhase === 'instructionWait') {
+                if (key === ' ') {
+                    nextDecisionTrial();
+                }
+            }
+        }
+
+        // 开始实验
+        function startExperiment() {
+            randomizeBlockOrder();
+            currentPhase = 'intro';
+            currentIndex = 0;
+            showImage(config.introImages[0]);
+            updateMonitor('阶段', '指导语阶段');
+            sendMonitorData('阶段', '指导语阶段');
+        }
+
+        // 下一张指导语
+        function nextIntro() {
+            currentIndex++;
+            if (currentIndex < config.introImages.length) {
+                showImage(config.introImages[currentIndex]);
+            } else {
+                startPractice();
+            }
+        }
+
+        // 开始练习
+        function startPractice() {
+            currentPhase = 'practice';
+            currentTrial = 0;
+            updateMonitor('阶段', '练习阶段');
+            sendMonitorData('阶段', '练习阶段');
+            nextPracticeTrial();
+        }
+
+        // 下一个练习试次
+        function nextPracticeTrial() {
+            if (currentTrial < practiceTrials.length) {
+                const trial = practiceTrials[currentTrial];
+                showPracticeInstruction(trial.question);
+                awaitingResponse = true;
+                trialStartTime = Date.now();
+            } else {
+                showPracticeComplete();
+            }
+        }
+
+        // 处理练习反应
+        function handlePracticeResponse(key) {
+            if (!awaitingResponse) return;
+            
+            awaitingResponse = false;
+            const rt = Date.now() - trialStartTime;
+            const trial = practiceTrials[currentTrial];
+            const correct = (key === trial.correctKey);
+            
+            experimentData.practiceData.push({
+                trial: currentTrial + 1,
+                question: trial.question,
+                correctKey: trial.correctKey,
+                response: key,
+                rt: rt,
+                correct: correct
+            });
+
+            const msg = `试次${currentTrial + 1}: ${correct ? '正确' : '错误'} (${key}键)`;
+            updateMonitor('练习反应', msg);
+            sendMonitorData('练习反应', msg);
+
+            showFeedback(correct);
+            
+            setTimeout(() => {
+                if (correct) {
+                    currentTrial++;
+                    nextPracticeTrial();
+                } else {
+                    currentTrial = 0;
+                    experimentData.practiceData.push({
+                        event: 'practice_restart',
+                        timestamp: new Date().toISOString()
+                    });
+                    updateMonitor('练习', '答错，重新开始练习');
+                    sendMonitorData('练习', '答错，重新开始练习');
+                    nextPracticeTrial();
+                }
+            }, 1000);
+        }
+
+        // 显示练习完成
+        function showPracticeComplete() {
+            showImage(config.beginImage);
+            currentPhase = 'waitForSpace';
+            currentIndex = 0;
+            updateMonitor('阶段', '练习完成，准备进入正式实验');
+            sendMonitorData('阶段', '练习完成，准备进入正式实验');
+        }
+
+        // 从等待状态继续
+        function continueFromWait() {
+            if (currentIndex === 0) {
+                startBlock(0);
+            } else if (currentIndex === 1) {
+                startBlock(1);
+            } else if (currentIndex === 2) {
+                saveDataToExcel();
+            }
+        }
+
+        // 开始Block
+        function startBlock(blockNum) {
+            currentBlock = blockNum;
+            currentPhase = 'learning';
+            currentTrial = 0;
+            
+            const exampleIndex = blockOrder[blockNum];
+            currentExample = config.exampleVideos[exampleIndex];
+            
+            experimentData.blockData.push({
+                block: blockNum + 1,
+                exampleVideo: currentExample,
+                trials: []
+            });
+
+            const msg = `Block ${blockNum + 1}, 示例视频: ${currentExample}`;
+            updateMonitor('Block开始', msg);
+            sendMonitorData('Block开始', msg);
+
+            showInstruction('请先观看下面的视频<br>无需做出反应');
+            
+            setTimeout(() => {
+                const video = showVideo(currentExample);
+                video.onended = () => {
+                    setTimeout(() => {
+                        startDecisionPhase();
+                    }, 500);
+                };
+            }, 3000);
+        }
+
+        // 开始决策阶段
+        function startDecisionPhase() {
+            currentPhase = 'instructionWait';
+            currentTrial = 0;
+            currentVideos = shuffle([...config.decisionVideos]);
+            
+            experimentData.blockData[currentBlock].videoOrder = currentVideos;
+            
+            const msg = `Block ${currentBlock + 1} 决策阶段开始`;
+            updateMonitor('决策阶段', msg);
+            sendMonitorData('决策阶段', msg);
+            
+            showInstruction('接下来请观看视频并做出选择<br><br>当出现金黄色圆圈提示时，请立即做出反应<br><br>F键 = 让车先通过（让行）<br>J键 = 自己先通过（不让行）<br><br><br>理解后请按"空格键"开始');
+        }
+
+        // 下一个决策试次
+        function nextDecisionTrial() {
+            currentPhase = 'decision';
+            
+            if (currentTrial < currentVideos.length) {
+                showFixation();
+                
+                setTimeout(() => {
+                    currentVideo = currentVideos[currentTrial];
+                    const msg = `Block ${currentBlock + 1}, Trial ${currentTrial + 1}: ${currentVideo}`;
+                    updateMonitor('Trial开始', msg);
+                    sendMonitorData('Trial开始', msg);
+                    
+                    const video = showVideo(currentVideo);
+                    
+                    responseCueTimeout = setTimeout(() => {
+                        showResponseCue();
+                        awaitingResponse = true;
+                        trialStartTime = Date.now();
+                        
+                        const cueMsg = `Trial ${currentTrial + 1}: 金圈出现，等待被试反应`;
+                        updateMonitor('等待反应', cueMsg);
+                        sendMonitorData('等待反应', cueMsg);
+                        
+                        responseTimeout = setTimeout(() => {
+                            if (awaitingResponse) {
+                                handleDecisionResponse(null, true);
+                            }
+                        }, config.responseTimeout);
+                    }, config.videoBeforeCue);
+                    
+                    video.onended = () => {};
+                }, config.fixationDuration);
+                
+            } else {
+                if (currentBlock === 0) {
+                    showBreak();
+                } else {
+                    showEnd();
+                }
+            }
+        }
+
+        // 处理决策反应
+        function handleDecisionResponse(key, timeout = false) {
+            if (!awaitingResponse && !timeout) return;
+            
+            awaitingResponse = false;
+            clearAllTimers();
+            removeResponseCue();
+            
+            const rt = timeout ? null : (Date.now() - trialStartTime);
+            
+            const trialData = {
+                block: currentBlock + 1,
+                trial: currentTrial + 1,
+                video: currentVideo,
+                scenario: getScenarioName(currentVideo),
+                response: timeout ? 'timeout' : (key === 'f' ? 'yield' : 'not_yield'),
+                responseKey: timeout ? 'none' : key,
+                responseLabel: timeout ? '超时无反应' : (key === 'f' ? '让行' : '不让行'),
+                rt: rt,
+                timestamp: new Date().toISOString()
+            };
+            
+            experimentData.blockData[currentBlock].trials.push(trialData);
+            
+            const msg = `Trial ${currentTrial + 1}: ${trialData.responseLabel}, RT=${rt ? rt.toFixed(0) + 'ms' : '超时'}`;
+            updateMonitor('反应记录', msg);
+            sendMonitorData('反应记录', msg);
+            
+            currentTrial++;
+            
+            setTimeout(() => {
+                nextDecisionTrial();
+            }, 200);
+        }
+
+        // 从视频文件名提取场景名称
+        function getScenarioName(videoName) {
+            if (videoName.includes('Crossing')) return 'Crossing';
+            if (videoName.includes('Following')) return 'Following';
+            if (videoName.includes('parking')) return 'Parking';
+            if (videoName.includes('Starting')) return 'Starting';
+            return 'Unknown';
+        }
+
+        // 显示休息
+        function showBreak() {
+            showImage(config.breakImage);
+            currentPhase = 'waitForSpace';
+            currentIndex = 1;
+            updateMonitor('阶段', 'Block 1 完成，休息中');
+            sendMonitorData('阶段', 'Block 1 完成，休息中');
+        }
+
+        // 显示结束
+        function showEnd() {
+            experimentData.endTime = new Date().toISOString();
+            showImage(config.endImage);
+            currentPhase = 'waitForSpace';
+            currentIndex = 2;
+            updateMonitor('阶段', '实验完成');
+            sendMonitorData('阶段', '实验完成');
+        }
+
+        // 保存数据为Excel
+        function saveDataToExcel() {
+            // 准备Excel数据
+            const excelData = [];
+            
+            experimentData.blockData.forEach(block => {
+                block.trials.forEach(trial => {
+                    excelData.push({
+                        '被试编号': experimentData.participantId,
+                        'Block': trial.block,
+                        'Block示例视频': block.exampleVideo,
+                        'Trial': trial.trial,
+                        'Trial视频': trial.video,
+                        '场景类型': trial.scenario,
+                        '行为选择': trial.responseLabel,
+                        '按键': trial.responseKey,
+                        '反应时间(ms)': trial.rt,
+                        '时间戳': trial.timestamp
+                    });
+                });
+            });
+            
+            // 创建工作簿
+            const wb = XLSX.utils.book_new();
+            const ws = XLSX.utils.json_to_sheet(excelData);
+            
+            // 添加工作表
+            XLSX.utils.book_append_sheet(wb, ws, "实验数据");
+            
+            // 生成文件并下载
+            const filename = `${experimentData.participantId}.xlsx`;
+            XLSX.writeFile(wb, filename);
+            
+            updateMonitor('数据保存', `文件已下载: ${filename}`);
+            sendMonitorData('数据保存', `文件已下载: ${filename}`);
+            
+            showInstruction('数据已下载！<br>文件名：' + filename + '<br><br>请将文件移动到桌面的data文件夹<br><br>感谢参与！');
+        }
+    </script>
+</body>
+</html>
