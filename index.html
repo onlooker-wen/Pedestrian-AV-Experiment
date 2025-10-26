@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>行人-车辆交互决策实验</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <style>
+    *{margin:0;padding:0;box-sizing:border-box}
+    body{background:#000;color:#fff;font-family:"Microsoft YaHei",Arial,sans-serif;overflow:hidden}
+    #container{width:100vw;height:100vh;display:flex;justify-content:center;align-items:center;position:relative}
+    #display{width:100%;height:100%;display:flex;flex-direction:column;justify-content:center;align-items:center;position:relative}
+    img,video{width:100vw;height:100vh;object-fit:cover}
+    .instruction{font-size:32px;line-height:2;text-align:center;padding:40px}
+    .practice-instruction{font-size:36px;line-height:2.5;text-align:center}
+    .practice-question{font-size:40px;margin-bottom:60px;font-weight:bold}
+    .feedback{font-size:48px;font-weight:bold}
+    .correct{color:#00ff00}.incorrect{color:#ff0000}
+    .fixation{font-size:80px;font-weight:bold;color:#fff}
+    .response-cue{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:80px;height:80px;border:5px solid #FFD700;border-radius:50%;animation:pulse .8s ease-in-out infinite;box-shadow:0 0 20px #FFD700}
+    @keyframes pulse{0%,100%{transform:translate(-50%,-50%) scale(1);opacity:1}50%{transform:translate(-50%,-50%) scale(1.15);opacity:.8}}
+    #inputScreen{background:#000;width:100vw;height:100vh;display:flex;flex-direction:column;justify-content:center;align-items:center}
+    #inputScreen h1{font-size:48px;margin-bottom:40px;letter-spacing:3px}
+    #inputScreen input{font-size:32px;padding:15px 30px;background:#333;color:#fff;border:2px solid #666;border-radius:8px;text-align:center;margin-bottom:30px;width:400px}
+    #inputScreen button{font-size:28px;padding:15px 50px;background:#4CAF50;color:#fff;border:none;border-radius:8px;cursor:pointer;margin:10px}
+    #inputScreen button:hover{background:#45a049}
+    #monitorPanel{position:fixed;top:0;right:-420px;width:400px;height:100vh;background:rgba(0,0,0,.95);color:#fff;padding:20px;overflow-y:auto;transition:right .3s;z-index:1000;border-left:2px solid #4CAF50}
+    #monitorPanel.show{right:0}
+    #monitorToggle{position:fixed;top:10px;right:10px;padding:10px 15px;background:rgba(76,175,80,.85);color:#fff;border:none;border-radius:6px;cursor:pointer;z-index:1001;font-size:14px}
+    #monitorPanel h3{color:#4CAF50;margin-bottom:15px;font-size:18px}
+    .monitor-item{background:rgba(255,255,255,.1);padding:10px;margin-bottom:10px;border-radius:6px;font-size:12px}
+    .monitor-item strong{color:#FFD700}
+    .hidden{display:none !important}
+    #fullscreenPrompt{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;background:rgba(0,0,0,.9);z-index:2000}
+    #fullscreenPrompt h2{font-size:32px;margin-bottom:12px}
+    #fullscreenPrompt p{font-size:18px;color:#bbb}
+    #fullscreenPrompt button{margin-top:16px;font-size:20px;padding:12px 28px;background:#2d8f57;color:#fff;border:0;border-radius:10px;cursor:pointer}
+  </style>
+  <script>
+    (function(){
+      var root = location.pathname.replace(/[^/]*$/, '');
+      window.MATERIAL_PATH = root + 'material/';
+      console.log('[MATERIAL_PATH]', window.MATERIAL_PATH);
+    })();
+  </script>
+</head>
+<body>
+  <div id="fullscreenPrompt" class="hidden">
+    <h2>实验需要全屏模式</h2>
+    <p>点击下方按钮进入全屏</p>
+    <button onclick="enterFullscreen()">进入全屏</button>
+  </div>
+
+  <button id="monitorToggle" class="hidden" onclick="toggleMonitor()">📊 数据监控</button>
+  <div id="monitorPanel" class="hidden">
+    <h3>实时数据监控</h3>
+    <div id="monitorContent"></div>
+  </div>
+
+  <div id="inputScreen">
+    <h1>欢迎参与实验</h1>
+    <input type="text" id="participantId" placeholder="请输入被试编号" maxlength="20">
+    <button onclick="startExperimentWithId()">开始实验</button>
+  </div>
+
+  <div id="container" class="hidden">
+    <div id="display"></div>
+  </div>
+
+  <script>
+    const config = {
+      introImages:['intro_01.png','intro_02.png','intro_03.png'],
+      beginImage:'begin.png',
+      breakImage:'break.png',
+      endImage:'end.png',
+      exampleVideos:['example1.mp4','example2.mp4'],
+      decisionVideos:['Crossing_v1.mp4','Crossing_v2.mp4','Following_v1.mp4','Following_v2.mp4','parking_v2.mp4','parking.mp4','Starting_v2.mp4','starting.mp4'],
+      fixationDuration:3000, videoBeforeCue:6000, responseTimeout:20000
+    };
+    const practiceTrials=[{question:'请按下能表示【自己先通过】的键',correctKey:'j'},{question:'请按下能表示【让车先通过】的键',correctKey:'f'}];
+    let experimentData={participantId:'',startTime:'',practiceData:[],blockData:[]};
+    let currentPhase='intro',currentIndex=0,currentBlock=0,currentTrial=0,blockOrder=[],trialStartTime=0,awaitingResponse=false,currentVideo='',currentVideos=[],responseTimeout=null,responseCueTimeout=null,monitorVisible=false;
+
+    function enterFullscreen(){const el=document.documentElement; if(el.requestFullscreen) el.requestFullscreen({navigationUI:'hide'}); else if(el.webkitRequestFullscreen) el.webkitRequestFullscreen(); document.getElementById('fullscreenPrompt').classList.add('hidden'); setTimeout(()=>window.scrollTo(0,1),100);}
+    function checkFullscreen(){ if(!document.fullscreenElement && !document.webkitFullscreenElement){ document.getElementById('fullscreenPrompt').classList.remove('hidden'); } }
+    document.addEventListener('fullscreenchange',checkFullscreen); document.addEventListener('webkitfullscreenchange',checkFullscreen);
+
+    function toggleMonitor(){monitorVisible=!monitorVisible; const p=document.getElementById('monitorPanel'); if(monitorVisible){p.classList.add('show');}else{p.classList.remove('show');}}
+    function updateMonitor(title,content){const wrap=document.getElementById('monitorContent'); const item=document.createElement('div'); item.className='monitor-item'; item.innerHTML=`<strong>[${new Date().toLocaleTimeString()}] ${title}</strong><br>${content}`; wrap.insertBefore(item,wrap.firstChild); while(wrap.children.length>30) wrap.removeChild(wrap.lastChild);}
+
+    function showImage(n){document.getElementById('display').innerHTML=`<img src="${MATERIAL_PATH}${n}" alt="${n}">`;}
+    function showVideo(n){const d=document.getElementById('display'); d.innerHTML=`<video id="experimentVideo" autoplay><source src="${MATERIAL_PATH}${n}" type="video/mp4"></video>`; const v=document.getElementById('experimentVideo'); v.play().catch(console.warn); return v;}
+    function showFixation(){document.getElementById('display').innerHTML='<div class="fixation">+</div>';}
+    function showInstruction(t){document.getElementById('display').innerHTML=`<div class="instruction">${t}</div>`;}
+    function showPracticeInstruction(t){document.getElementById('display').innerHTML=`<div class="practice-instruction"><div class="practice-question">${t}</div>(按错将重新练习)</div>`;}
+    function showFeedback(ok){document.getElementById('display').innerHTML=`<div class="feedback ${ok?'correct':'incorrect'}">${ok?'✓':'✗'}</div>`;}
+    function showResponseCue(){const c=document.createElement('div'); c.className='response-cue'; c.id='responseCue'; document.getElementById('display').appendChild(c);}
+    function removeResponseCue(){const c=document.getElementById('responseCue'); if(c) c.remove();}
+    function clearAllTimers(){if(responseTimeout){clearTimeout(responseTimeout);responseTimeout=null} if(responseCueTimeout){clearTimeout(responseCueTimeout);responseCueTimeout=null}}
+
+    function startExperimentWithId(){
+      const pid=document.getElementById('participantId').value.trim();
+      if(!pid){alert('请输入被试编号！');return;}
+      experimentData.participantId=pid; experimentData.startTime=new Date().toISOString();
+      const btn=document.getElementById('monitorToggle'); const panel=document.getElementById('monitorPanel');
+      if(pid==='621'){ btn.classList.remove('hidden'); panel.classList.remove('hidden'); } else { btn.classList.add('hidden'); panel.classList.add('hidden'); monitorVisible=false; }
+      document.getElementById('inputScreen').classList.add('hidden'); document.getElementById('container').classList.remove('hidden');
+      enterFullscreen(); setTimeout(startExperiment,300);
+    }
+
+    document.addEventListener('keydown',e=>{
+      const k=(e.key||'').toLowerCase();
+      if(currentPhase==='intro' && k===' '){ e.preventDefault(); nextIntro(); }
+      else if(currentPhase==='practice' && awaitingResponse && (k==='f'||k==='j')){ e.preventDefault(); handlePracticeResponse(k); }
+      else if(currentPhase==='decision' && awaitingResponse && (k==='f'||k==='j')){ e.preventDefault(); handleDecisionResponse(k); }
+      else if(currentPhase==='waitForSpace' && k===' '){ e.preventDefault(); continueFromWait(); }
+      else if(currentPhase==='instructionWait' && k===' '){ e.preventDefault(); nextDecisionTrial(); }
+    },{passive:false});
+
+    function shuffle(a){const arr=[...a]; for(let i=arr.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1)); [arr[i],arr[j]]=[arr[j],arr[i]]} return arr;}
+    function randomizeBlockOrder(){blockOrder=shuffle([0,1])}
+    function startExperiment(){randomizeBlockOrder(); currentPhase='intro'; currentIndex=0; showImage(config.introImages[0]); updateMonitor('阶段','指导语阶段')}
+    function nextIntro(){currentIndex++; if(currentIndex<config.introImages.length){showImage(config.introImages[currentIndex])} else {startPractice()}}
+    function startPractice(){currentPhase='practice'; currentTrial=0; updateMonitor('阶段','练习阶段'); nextPracticeTrial()}
+    function nextPracticeTrial(){ if(currentTrial<practiceTrials.length){ const t=practiceTrials[currentTrial]; showPracticeInstruction(t.question); awaitingResponse=true; trialStartTime=Date.now(); } else { showPracticeComplete(); } }
+    function handlePracticeResponse(k){ if(!awaitingResponse) return; awaitingResponse=false; const rt=Date.now()-trialStartTime; const t=practiceTrials[currentTrial]; const ok=(k===t.correctKey); experimentData.practiceData.push({trial:currentTrial+1,question:t.question,correctKey:t.correctKey,response:k,rt,correct:ok}); updateMonitor('练习反应',`试次${currentTrial+1}:${ok?'正确':'错误'} (${k}键)`); showFeedback(ok); setTimeout(()=>{ if(ok){currentTrial++; nextPracticeTrial();} else {currentTrial=0; updateMonitor('练习','答错，重新开始练习'); nextPracticeTrial();}},1000); }
+    function showPracticeComplete(){ showImage(config.beginImage); currentPhase='waitForSpace'; currentIndex=0; updateMonitor('阶段','练习完成，准备进入正式实验') }
+    function continueFromWait(){ if(currentIndex===0) startBlock(0); else if(currentIndex===1) startBlock(1); else if(currentIndex===2) saveDataToExcel(); }
+    function startBlock(b){ currentBlock=b; currentPhase='learning'; currentTrial=0; const exampleIndex=blockOrder[b]; const example=config.exampleVideos[exampleIndex]; experimentData.blockData.push({block:b+1,exampleVideo:example,trials:[]}); updateMonitor('Block开始',`Block ${b+1}, 示例视频: ${example}`); showInstruction('请先观看下面的视频<br>无需做出反应'); setTimeout(()=>{ const v=showVideo(example); v.onended=()=>setTimeout(startDecisionPhase,500); },3000); }
+    function startDecisionPhase(){ currentPhase='instructionWait'; currentTrial=0; currentVideos=shuffle([...config.decisionVideos]); experimentData.blockData[currentBlock].videoOrder=currentVideos; updateMonitor('决策阶段',`Block ${currentBlock+1} 决策阶段开始`); showInstruction('接下来请观看视频并做出选择<br><br>当出现金黄色圆圈提示时，请立即做出反应<br><br><b>F键</b>=让车先通过（让行）<br><b>J键</b>=自己先通过（不让行）<br><br>理解后请按空格开始'); }
+    function nextDecisionTrial(){ currentPhase='decision'; if(currentTrial<currentVideos.length){ showFixation(); setTimeout(()=>{ currentVideo=currentVideos[currentTrial]; updateMonitor('Trial开始',`Block ${currentBlock+1}, Trial ${currentTrial+1}: ${currentVideo}`); const v=showVideo(currentVideo); responseCueTimeout=setTimeout(()=>{ showResponseCue(); awaitingResponse=true; trialStartTime=Date.now(); updateMonitor('等待反应',`Trial ${currentTrial+1}: 金圈出现`); responseTimeout=setTimeout(()=>{ if(awaitingResponse) handleDecisionResponse(null,true); },config.responseTimeout); },config.videoBeforeCue); v.onended=()=>{}; },config.fixationDuration); } else { if(currentBlock===0) showBreak(); else showEnd(); } }
+    function handleDecisionResponse(k,timeout=false){ if(!awaitingResponse && !timeout) return; awaitingResponse=false; clearAllTimers(); removeResponseCue(); const rt=timeout?null:(Date.now()-trialStartTime); const trialData={block:currentBlock+1,trial:currentTrial+1,video:currentVideo,scenario:getScenarioName(currentVideo),response:timeout?'timeout':(k==='f'?'yield':'not_yield'),responseKey:timeout?'none':k,responseLabel:timeout?'超时无反应':(k==='f'?'让行':'不让行'),rt,timestamp:new Date().toISOString()}; experimentData.blockData[currentBlock].trials.push(trialData); updateMonitor('反应记录',`Trial ${currentTrial+1}: ${trialData.responseLabel}, RT=${rt?rt.toFixed(0)+'ms':'超时'}`); currentTrial++; setTimeout(nextDecisionTrial,200); }
+    function getScenarioName(v){ if(v.includes('Crossing')) return 'Crossing'; if(v.includes('Following')) return 'Following'; if(v.includes('parking')) return 'Parking'; if(v.includes('Starting')) return 'Starting'; return 'Unknown'; }
+    function showBreak(){ showImage(config.breakImage); currentPhase='waitForSpace'; currentIndex=1; updateMonitor('阶段','Block 1 完成，休息中'); }
+    function showEnd(){ experimentData.endTime=new Date().toISOString(); showImage(config.endImage); currentPhase='waitForSpace'; currentIndex=2; updateMonitor('阶段','实验完成'); }
+    function saveDataToExcel(){ const rows=[]; experimentData.blockData.forEach(b=>b.trials.forEach(t=>{ rows.push({'被试编号':experimentData.participantId,'Block':t.block,'Block示例视频':b.exampleVideo,'Trial':t.trial,'Trial视频':t.video,'场景类型':t.scenario,'行为选择':t.responseLabel,'按键':t.responseKey,'反应时间(ms)':t.rt,'时间戳':t.timestamp}); })); const wb=XLSX.utils.book_new(); const ws=XLSX.utils.json_to_sheet(rows); XLSX.utils.book_append_sheet(wb,ws,'实验数据'); const fname=`${experimentData.participantId}.xlsx`; XLSX.writeFile(wb,fname); updateMonitor('数据保存',`文件已下载: ${fname}`); showInstruction('数据已下载！<br>文件名：'+fname+'<br><br>感谢参与！'); }
+  </script>
+</body>
+</html>
