@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>素材路径 Demo（GitHub Pages 友好）</title>
+  <style>
+    html,body{
+      margin:0; padding:0; background:#000; color:#fff; height:100%; overflow:hidden;
+      font-family: -apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",Arial,sans-serif;
+    }
+    #toolbar{
+      position:fixed; top:12px; right:12px; display:flex; gap:8px; z-index:10;
+    }
+    #toolbar button{
+      padding:8px 12px; border:0; border-radius:6px; background:#2d8f57; color:#fff; cursor:pointer;
+    }
+    #toolbar select{
+      padding:6px 8px; border-radius:6px; border:1px solid #666; background:#111; color:#fff;
+    }
+    #display{
+      width:100vw; height:100vh; display:flex; align-items:center; justify-content:center;
+    }
+    #display img, #display video{
+      max-width:100vw; max-height:100vh; display:block;
+    }
+    #fsOverlay{
+      position:fixed; inset:0; background:#000; display:flex; align-items:center; justify-content:center;
+      flex-direction:column; gap:16px;
+    }
+    #fsOverlay h1{ margin:0; font-size:28px; }
+    #fsOverlay p{ margin:0 0 8px 0; color:#bbb; }
+    #fsOverlay button{
+      padding:12px 22px; font-size:18px; background:#2d8f57; color:#fff; border:0; border-radius:10px; cursor:pointer;
+    }
+    a.link{ color:#80d6ff; text-decoration:none; }
+  </style>
+
+  <script>
+  // === 计算素材根路径（兼容 GitHub Pages 子路径 / 本地 file 协议）===
+  (function () {
+    var root = location.pathname.replace(/[^/]*$/, ''); // 当前页面所在目录（以/结尾）
+    window.MATERIAL_PATH = root + 'material/';
+    // 控制台提示，便于自检
+    console.log('[Demo] MATERIAL_PATH =', window.MATERIAL_PATH);
+  })();
+  </script>
+</head>
+
+<body>
+  <!-- 工具栏 -->
+  <div id="toolbar">
+    <select id="assetSelect">
+      <optgroup label="图片">
+        <option value="img:intro_01.png">intro_01.png</option>
+        <option value="img:intro_02.png">intro_02.png</option>
+        <option value="img:intro_03.png">intro_03.png</option>
+        <option value="img:begin.png">begin.png</option>
+        <option value="img:break.png">break.png</option>
+        <option value="img:end.png">end.png</option>
+      </optgroup>
+      <optgroup label="视频">
+        <option value="vid:example1.mp4">example1.mp4</option>
+        <option value="vid:example2.mp4">example2.mp4</option>
+        <option value="vid:Crossing_v1.mp4">Crossing_v1.mp4</option>
+        <option value="vid:Crossing_v2.mp4">Crossing_v2.mp4</option>
+        <option value="vid:Following_v1.mp4">Following_v1.mp4</option>
+        <option value="vid:Following_v2.mp4">Following_v2.mp4</option>
+        <option value="vid:parking.mp4">parking.mp4</option>
+        <option value="vid:parking_v2.mp4">parking_v2.mp4</option>
+        <option value="vid:starting.mp4">starting.mp4</option>
+        <option value="vid:Starting_v2.mp4">Starting_v2.mp4</option>
+      </optgroup>
+    </select>
+    <button id="showBtn">显示/播放</button>
+    <button id="fsBtn">全屏</button>
+  </div>
+
+  <!-- 显示区域 -->
+  <div id="display"></div>
+
+  <!-- 全屏遮罩 -->
+  <div id="fsOverlay">
+    <h1>实验需要全屏模式</h1>
+    <p>点击下方按钮进入全屏</p>
+    <button id="enterFS">进入全屏</button>
+    <p style="font-size:12px;color:#888;margin-top:10px">
+      小贴士：把本文件命名为 <code>index.html</code> 放到与 <code>material/</code> 同级，即可直接用于 GitHub Pages。<br/>
+      <a class="link" target="_blank" href="https://onlooker-wen.github.io/Pedestrian-AV-Experiment/material/intro_01.png">测试素材路径</a>
+    </p>
+  </div>
+
+  <script>
+    const display = document.getElementById('display');
+    const fsOverlay = document.getElementById('fsOverlay');
+
+    // 基础功能：显示图片
+    function showImage(name) {
+      display.innerHTML = `<img src="${MATERIAL_PATH}${name}" alt="${name}">`;
+    }
+
+    // 基础功能：播放视频
+    function showVideo(name) {
+      display.innerHTML = `
+        <video controls autoplay playsinline>
+          <source src="${MATERIAL_PATH}${name}" type="video/mp4" />
+          你的浏览器不支持视频播放。
+        </video>`;
+      const v = display.querySelector('video');
+      v.onended = () => console.log('[Demo] video ended:', name);
+    }
+
+    // 事件：选择并展示
+    document.getElementById('showBtn').addEventListener('click', () => {
+      const val = document.getElementById('assetSelect').value;
+      const [kind, filename] = val.split(':');
+      if (kind === 'img') showImage(filename);
+      if (kind === 'vid') showVideo(filename);
+    });
+
+    // 全屏按钮（工具栏）
+    document.getElementById('fsBtn').addEventListener('click', () => {
+      const el = document.documentElement;
+      if (el.requestFullscreen) el.requestFullscreen();
+      else if (el.webkitRequestFullscreen) el.webkitRequestFullscreen();
+    });
+
+    // 顶部遮罩的全屏按钮
+    document.getElementById('enterFS').addEventListener('click', () => {
+      const el = document.documentElement;
+      if (el.requestFullscreen) el.requestFullscreen();
+      else if (el.webkitRequestFullscreen) el.webkitRequestFullscreen();
+      fsOverlay.style.display = 'none';
+      // 初始显示一张图，确认路径
+      showImage('intro_01.png');
+    });
+
+    // 如果已经是全屏，自动隐藏遮罩（避免重复）
+    document.addEventListener('fullscreenchange', () => {
+      if (document.fullscreenElement) fsOverlay.style.display = 'none';
+    });
+  </script>
+</body>
+</html>
