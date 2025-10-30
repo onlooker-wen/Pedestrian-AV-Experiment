@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>行人-车辆交互决策实验（4场景等额+随机低难转场）</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#000;color:#fff;font-family:"Microsoft YaHei",Arial,sans-serif;overflow:hidden}
+#container{width:100vw;height:100vh;display:flex;justify-content:center;align-items:center;position:relative}
+#display{width:100%;height:100%;display:flex;flex-direction:column;justify-content:center;align-items:center;position:relative}
+img,video{width:100vw;height:100vh;object-fit:cover}
+.instruction{font-size:32px;line-height:2;text-align:center;padding:40px}
+.practice-instruction{font-size:36px;line-height:2.5;text-align:center}
+.practice-question{font-size:40px;margin-bottom:60px;font-weight:bold}
+.feedback{font-size:48px;font-weight:bold}
+.correct{color:#0f0}.incorrect{color:#f00}
+.fixation{font-size:80px;font-weight:bold;color:#fff}
+.response-cue{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:80px;height:80px;border:5px solid #FFD700;border-radius:50%;animation:pulse .8s ease-in-out infinite;box-shadow:0 0 20px #FFD700}
+@keyframes pulse{0%,100%{transform:translate(-50%,-50%) scale(1);opacity:1}50%{transform:translate(-50%,-50%) scale(1.15);opacity:.8}}
+#inputScreen{background:#000;width:100vw;height:100vh;display:flex;flex-direction:column;justify-content:center;align-items:center}
+#inputScreen h1{font-size:48px;margin-bottom:40px;letter-spacing:3px}
+#inputScreen input{font-size:32px;padding:15px 30px;background:#333;color:#fff;border:2px solid #666;border-radius:8px;text-align:center;margin-bottom:30px;width:400px}
+#inputScreen button{font-size:28px;padding:15px 50px;background:#4CAF50;color:#fff;border:none;border-radius:8px;cursor:pointer;margin:10px}
+#inputScreen button:hover{background:#45a049}
+.hidden{display:none!important}
+
+/* 示例视频进度与控制 */
+.progress-container{position:absolute;left:50%;bottom:40px;transform:translateX(-50%);width:70vw;height:10px;background:rgba(255,255,255,.2);border-radius:6px;overflow:hidden;box-shadow:0 0 10px rgba(0,0,0,.5)}
+.progress-inner{height:100%;width:0;background:linear-gradient(90deg,#FFD700,#fff);transition:width .1s linear}
+.example-controls{position:absolute;left:50%;bottom:80px;transform:translateX(-50%);display:flex;gap:12px;align-items:center;background:rgba(0,0,0,.4);padding:10px 14px;border-radius:10px;font-size:16px}
+.example-controls button,.example-controls label{background:rgba(255,255,255,.1);color:#fff;border:1px solid rgba(255,255,255,.25);padding:6px 12px;border-radius:8px;cursor:pointer}
+.example-controls button:hover{background:rgba(255,255,255,.2)}
+</style>
+</head>
+<body>
+<div id="inputScreen">
+  <h1>欢迎参与实验</h1>
+  <input type="text" id="participantId" placeholder="请输入被试编号" maxlength="20">
+  <button onclick="startExperimentWithId()">开始实验</button>
+</div>
+<div id="container" class="hidden"><div id="display"></div></div>
+
+<script>
+
+// —— 全屏控制 ——  
+function enterFullscreen() {
+  const el = document.documentElement;
+  if (el.requestFullscreen) el.requestFullscreen({ navigationUI: "hide" });
+  else if (el.webkitRequestFullscreen) el.webkitRequestFullscreen();
+  else if (el.mozRequestFullScreen) el.mozRequestFullScreen();
+  else if (el.msRequestFullscreen) el.msRequestFullscreen();
+  setTimeout(() => window.scrollTo(0, 1), 100);
+}
+
+function checkFullscreen() {
+  if (!document.fullscreenElement && 
+      !document.webkitFullscreenElement && 
+      !document.msFullscreenElement) {
+    alert("请保持全屏以继续实验！");
+  }
+}
+document.addEventListener("fullscreenchange", checkFullscreen);
+document.addEventListener("webkitfullscreenchange", checkFullscreen);
+document.addEventListener("msfullscreenchange", checkFullscreen);
+
+const MATERIAL_PATH = '/Users/onlooker_wen/Desktop/material/';
+
+const config = {
+  introImages: ['intro_01.png','intro_02.png','intro_03.png'],
+  beginImage: 'begin.png',
+  breakImage: 'break.png',
+  endImage: 'end.png',
+  exampleVideos: ['example1.mp4','example2.mp4'],
+  decisionVideos: [
+    'Crossing_v1.mp4','Crossing_v2.mp4',
+    'Following_v1.mp4','Following_v2.mp4',
+    'Parking_v1.mp4','Parking_v2.mp4',
+    'Starting_v1.mp4','Starting_v2.mp4'
+  ],
+  fixationDuration: 3000,
+  videoBeforeCue: 6000,
+  responseTimeout: 20000
+};
+
+// —— DIF（4 场景）+ 等额配额 ——
+const DIF = {
+  pools: {
+    'Following': ['Following_v1.mp4','Following_v2.mp4'],
+    'Crossing':  ['Crossing_v1.mp4','Crossing_v2.mp4'],
+    'Starting':  ['Starting_v1.mp4','Starting_v2.mp4'],
+    'Parking':   ['Parking_v1.mp4','Parking_v2.mp4']
+  },
+  totalTrials: 16 // 4 场景 × 4 次 = 16
+};
+
+// 练习
+const practiceTrials = [
+  { question:'请按下能表示【自己先通过】的键', correctKey:'n' },
+  { question:'请按下能表示【让车先通过】的键', correctKey:'y' }
+];
+
+// 实验数据
+let experimentData = { participantId:'', startTime:'', practiceData:[], blockData:[] };
+
+let currentPhase='intro', currentIndex=0, currentBlock=0, currentTrial=0;
+let trialStartTime=0, awaitingResponse=false;
+let currentVideo='', videoElement=null;
+let responseTimeout=null, responseCueTimeout=null;
+
+let difCurrentScenario='Following';
+let difPoolIndex={ 'Following':0,'Crossing':0,'Starting':0,'Parking':0 };
+function difResetQuota(){
+  window.difQuota={ 'Following':4,'Crossing':4,'Starting':4,'Parking':4 };
+  window.difUsed ={ 'Following':0,'Crossing':0,'Starting':0,'Parking':0 };
+}
+
+// 基础渲染
+function showImage(img){ document.getElementById('display').innerHTML=`<img src="${MATERIAL_PATH}${img}">`; }
+function showFixation(){ document.getElementById('display').innerHTML='<div class="fixation">+</div>'; }
+function showInstruction(t){ document.getElementById('display').innerHTML=`<div class="instruction">${t}</div>`; }
+function showPracticeInstruction(t){ document.getElementById('display').innerHTML=`<div class="practice-instruction"><div class="practice-question">${t}</div>(按错将重新练习)</div>`; }
+function showFeedback(ok){ document.getElementById('display').innerHTML = `<div class="feedback ${ok?'correct':'incorrect'}">${ok?'✓':'✗'}</div>`; }
+function showResponseCue(){ const c=document.createElement('div'); c.className='response-cue'; c.id='responseCue'; document.getElementById('display').appendChild(c); }
+function removeResponseCue(){ const c=document.getElementById('responseCue'); if(c) c.remove(); }
+
+function showVideo(videoName, options={}){
+  const { showProgress=false }=options;
+  const display=document.getElementById('display');
+  display.innerHTML=`
+    <div style="position:relative;width:100%;height:100%;">
+      <video id="experimentVideo" autoplay style="width:100%;height:100%;object-fit:cover;"></video>
+      ${showProgress?`
+        <div class="example-controls">
+          <button id="btnPlayPause">暂停</button>
+          <button id="btnReplay">重播</button>
+          <label style="display:flex;gap:6px;align-items:center;">
+            <input id="chkLoop" type="checkbox"> 循环播放
+          </label>
+          <button id="btnContinue">继续</button>
+        </div>
+        <div class="progress-container"><div id="progressInner" class="progress-inner"></div></div>
+      `:''}
+    </div>`;
+  videoElement=document.getElementById('experimentVideo');
+  const src=document.createElement('source');
+  src.src=`${MATERIAL_PATH}${videoName}`; src.type='video/mp4';
+  videoElement.appendChild(src);
+  videoElement.play().catch(()=>{});
+
+  if(showProgress){
+    const inner=document.getElementById('progressInner');
+    const btnPlayPause=document.getElementById('btnPlayPause');
+    const btnReplay=document.getElementById('btnReplay');
+    const chkLoop=document.getElementById('chkLoop');
+    const btnContinue=document.getElementById('btnContinue');
+    videoElement.loop=false;
+    videoElement.addEventListener('timeupdate',()=>{
+      if(!isNaN(videoElement.duration)&&videoElement.duration>0){
+        inner.style.width=(videoElement.currentTime/videoElement.duration*100)+'%';
+      }
+    });
+    btnPlayPause.onclick=()=>{ if(videoElement.paused){videoElement.play();btnPlayPause.textContent='暂停';}else{videoElement.pause();btnPlayPause.textContent='播放';} };
+    btnReplay.onclick=()=>{ videoElement.currentTime=0; videoElement.play(); };
+    chkLoop.onchange=()=>{ videoElement.loop=chkLoop.checked; };
+    btnContinue.onclick=()=>{ startDecisionPhase(); };
+    videoElement.addEventListener('ended',()=>{ if(!videoElement.loop){ currentPhase='learningWait'; } });
+  }
+  return videoElement;
+}
+
+// 输入开始
+function startExperimentWithId(){
+  const pid=document.getElementById('participantId').value.trim();
+  if(!pid){ alert('请输入被试编号！'); return; }
+  experimentData.participantId=pid; experimentData.startTime=new Date().toISOString();
+  document.getElementById('inputScreen').classList.add('hidden');
+  document.getElementById('container').classList.remove('hidden');
+  enterFullscreen();
+  startExperiment();
+}
+
+// 键盘
+document.addEventListener('keydown',(e)=>{
+  const key=e.key.toLowerCase();
+  if(currentPhase==='intro'){ if(key===' ') nextIntro(); }
+  else if(currentPhase==='practice'){ if(awaitingResponse&&(key==='y'||key==='n')) handlePracticeResponse(key); }
+  else if(currentPhase==='decision'){ if(awaitingResponse&&(key==='y'||key==='n')) handleDecisionResponse(key); }
+  else if(currentPhase==='instructionWait'){ if(key===' ') nextDecisionTrial(); }
+  else if(currentPhase==='learning' || currentPhase==='learningWait'){ if(key===' ') startDecisionPhase(); }
+  else if(currentPhase==='waitForSpace'){ if(key===' ') continueFromWait(); }
+});
+
+// 练习
+function handlePracticeResponse(key){
+  awaitingResponse=false;
+  const rt=Date.now()-trialStartTime;
+  const trial=practiceTrials[currentTrial];
+  const correct=(key===trial.correctKey);
+  experimentData.practiceData.push({trial:currentTrial+1,question:trial.question,correctKey:trial.correctKey,response:key,rt,correct});
+  showFeedback(correct);
+  setTimeout(()=>{
+    if(correct){ currentTrial++; nextPracticeTrial(); }
+    else { currentTrial=0; nextPracticeTrial(); }
+  },800);
+}
+function nextPracticeTrial(){
+  if(currentTrial<practiceTrials.length){
+    const t=practiceTrials[currentTrial];
+    showPracticeInstruction(t.question); awaitingResponse=true; trialStartTime=Date.now();
+  }else{ showPracticeComplete(); }
+}
+
+// 流程
+function startExperiment(){ currentPhase='intro'; currentIndex=0; showImage(config.introImages[0]); }
+function nextIntro(){ currentIndex++; if(currentIndex<config.introImages.length){ showImage(config.introImages[currentIndex]); } else { startPractice(); } }
+function startPractice(){ currentPhase='practice'; currentTrial=0; nextPracticeTrial(); }
+function showPracticeComplete(){ showImage(config.beginImage); currentPhase='waitForSpace'; currentIndex=0; }
+function continueFromWait(){ if(currentIndex===0){ startBlock(0); } else if(currentIndex===1){ startBlock(1);} else if(currentIndex===2){ saveDataToExcel(); } }
+
+function startBlock(blockNum){
+  currentBlock=blockNum; currentPhase='learning'; currentTrial=0;
+  const example= config.exampleVideos[blockNum%config.exampleVideos.length];
+  experimentData.blockData.push({ block:blockNum+1, exampleVideo:example, trials:[] });
+  showInstruction('请先观看下面的视频<br>可循环/重播，准备好后进入下一阶段');
+  setTimeout(()=>{ showVideo(example,{showProgress:true}); }, 1500);
+  setTimeout(()=>{ currentPhase='learning'; }, 1600);
+  setTimeout(()=>{ /* wait for continue */ }, 2000);
+}
+
+function startDecisionPhase(){
+  currentPhase='instructionWait'; currentTrial=0;
+  difCurrentScenario='Following';
+  difPoolIndex={ 'Following':0,'Crossing':0,'Starting':0,'Parking':0 };
+  difResetQuota();
+  showInstruction('接下来请观看视频并做出选择<br><br>当出现金黄色圆圈提示时，请立即做出反应<br><br>Y键 = 让车先通过（让行）<br>N键 = 自己先通过（不让行）<br><br>理解后请按\"空格键\"开始');
+}
+
+// —— 选择工具 ——
+function chooseScenarioWithQuota(prefList, randomize=false){
+  const candidates=[];
+  for(const sc of prefList){
+    if(window.difUsed[sc] < window.difQuota[sc]) candidates.push(sc);
+  }
+  if(candidates.length===0) return null;
+  if(randomize){ const i=Math.floor(Math.random()*candidates.length); return candidates[i]; }
+  return candidates[0];
+}
+function pickVideoFromScenario(scn){
+  if(window.difUsed[scn] >= window.difQuota[scn]) return null;
+  const pool=DIF.pools[scn]; if(!pool||pool.length===0) return null;
+  const idx= difPoolIndex[scn] % pool.length; difPoolIndex[scn]++;
+  window.difUsed[scn]++;
+  return pool[idx];
+}
+function decideNextScenario(label, timeout=false){
+  const accepted = (!timeout && label==='让行'); // Y=让行=接受
+  switch(difCurrentScenario){
+    case 'Following':
+      difCurrentScenario = accepted ? 'Crossing' : (chooseScenarioWithQuota(['Starting','Parking'], true) || 'Starting');
+      break;
+    case 'Crossing':
+      difCurrentScenario = accepted ? 'Following' : (chooseScenarioWithQuota(['Starting','Parking'], true) || 'Starting');
+      break;
+    case 'Starting':
+      difCurrentScenario = accepted ? 'Following' : (chooseScenarioWithQuota(['Starting','Parking'], true) || 'Starting');
+      break;
+    case 'Parking':
+      difCurrentScenario = accepted ? 'Following' : (chooseScenarioWithQuota(['Starting','Parking'], true) || 'Parking');
+      break;
+  }
+}
+
+function getScenarioName(videoName){
+  if(videoName.includes('Following')) return 'Following';
+  if(videoName.includes('Crossing')) return 'Crossing';
+  if(videoName.includes('Starting')) return 'Starting';
+  if(videoName.includes('Parking')) return 'Parking';
+  return 'Unknown';
+}
+
+// —— 决策阶段 ——
+function nextDecisionTrial(){
+  currentPhase='decision';
+  if(currentTrial < DIF.totalTrials){
+    showFixation();
+    setTimeout(()=>{
+      // 若当前场景配额已满，随机挑一个有配额的场景
+      let scn=difCurrentScenario;
+      if(window.difUsed[scn] >= window.difQuota[scn]){
+        scn = chooseScenarioWithQuota(['Following','Crossing','Starting','Parking'], true) || 'Starting';
+      }
+      currentVideo = pickVideoFromScenario(scn) || config.decisionVideos[currentTrial % config.decisionVideos.length];
+      difCurrentScenario = scn;
+
+      showVideo(currentVideo);
+      responseCueTimeout=setTimeout(()=>{
+        showResponseCue(); awaitingResponse=true; trialStartTime=Date.now();
+        responseTimeout=setTimeout(()=>{ if(awaitingResponse) handleDecisionResponse(null,true); }, config.responseTimeout);
+      }, config.videoBeforeCue);
+    }, config.fixationDuration);
+  }else{
+    if(currentBlock===0){ showImage(config.breakImage); currentPhase='waitForSpace'; currentIndex=1; }
+    else{ showImage(config.endImage); currentPhase='waitForSpace'; currentIndex=2; }
+  }
+}
+
+function handleDecisionResponse(key, timeout=false){
+  if(!awaitingResponse && !timeout) return;
+  awaitingResponse=false;
+  if(responseTimeout){ clearTimeout(responseTimeout); responseTimeout=null; }
+  if(responseCueTimeout){ clearTimeout(responseCueTimeout); responseCueTimeout=null; }
+  removeResponseCue();
+  const rt= timeout? null : (Date.now()-trialStartTime);
+  const label = timeout ? '超时无反应' : (key==='y' ? '让行' : '不让行');
+
+  const trialData={
+    block: currentBlock+1,
+    trial: currentTrial+1,
+    video: currentVideo,
+    scenario: getScenarioName(currentVideo),
+    response: timeout ? 'timeout' : (key==='y' ? 'yield' : 'not_yield'),
+    responseKey: timeout ? 'none' : key,
+    responseLabel: label,
+    rt: rt,
+    timestamp: new Date().toISOString()
+  };
+  experimentData.blockData[currentBlock].trials.push(trialData);
+
+  // 更新下一个场景（随机低难转场）
+  decideNextScenario(label, timeout);
+
+  currentTrial++;
+  setTimeout(()=>{ nextDecisionTrial(); }, 200);
+}
+
+// —— 保存数据 ——
+function saveDataToExcel(){
+  const rows=[];
+  experimentData.blockData.forEach(block=>{
+    block.trials.forEach(trial=>{
+      rows.push({
+        '被试编号': experimentData.participantId,
+        'Block': trial.block,
+        'Block示例视频': block.exampleVideo,
+        'Trial': trial.trial,
+        'Trial视频': trial.video,
+        '场景类型': trial.scenario,
+        '行为选择': trial.responseLabel,
+        '按键': trial.responseKey,
+        '反应时间(ms)': trial.rt,
+        '时间戳': trial.timestamp
+      });
+    });
+  });
+  const wb=XLSX.utils.book_new();
+  const ws=XLSX.utils.json_to_sheet(rows);
+  XLSX.utils.book_append_sheet(wb, ws, '实验数据');
+  const filename = `${experimentData.participantId}.xlsx`;
+  XLSX.writeFile(wb, filename);
+  showInstruction('数据已下载！<br>文件名：'+filename+'<br><br>感谢参与！');
+}
+</script>
+</body>
+</html>
